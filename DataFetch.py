@@ -17,7 +17,7 @@ class MNISTDataSet(object):
             data = data[16:]
             imgs = np.zeros(num * col_size * row_size)
             for i, pixel in enumerate(data):
-                imgs[i] = pixel / 255
+                imgs[i] = 1 if (pixel / 255) > 0.6 else 0
             del data
             self.imgs = imgs.reshape((num, 28, 28, -1))
 
