@@ -118,9 +118,8 @@ if __name__ == '__main__':
         labels = np.concatenate((np.ones(REAL_COUNT, dtype=np.float32), np.zeros(FAKE_COUNT, dtype=np.float32)), axis=0)
         for imgs, _, epoch in dataset.training_batches():
             print('step>>>', step)
-            z = np.random.normal(0, 1, size=(FAKE_COUNT, SAMPLE_SPACE_DIM))
-            generated_imgs = sess.run(generated_output, feed_dict={
-                random_sample: z})
+            # z = np.random.normal(0, 1, size=(FAKE_COUNT, SAMPLE_SPACE_DIM))
+            z = np.random.uniform(-1, 1, size=(FAKE_COUNT, SAMPLE_SPACE_DIM))
             _, summ, r_pred, f_pred = sess.run((discriminator_train_step, discriminator_summ, real_prediction, fake_prediction),
                                      feed_dict={input_data: imgs,
                                                 random_sample: z})
@@ -130,7 +129,7 @@ if __name__ == '__main__':
             if step % 10 == 0:
                 for i in range(10):
                     _, summ, grad_summ = sess.run((generative_train_step, generator_summ, gradient_summ),
-                                                  feed_dict={random_sample: np.random.normal(0, 1,
+                                                  feed_dict={random_sample: np.random.uniform(-1, 1,
                                                                                              size=(FAKE_COUNT,
                                                                                                    SAMPLE_SPACE_DIM))})
                     writer.add_summary(summ, step)
@@ -141,6 +140,7 @@ if __name__ == '__main__':
                     random_sample: z})
                 writer.add_summary(summ, step)
             if step % 100 == 0:
+                generated_imgs = sess.run(generated_output, feed_dict={random_sample: z})
                 show_images(np.reshape(generated_imgs[:100, :], (100, -1)), pic_name='img/generate_%d'%step)
             step += 1
             sess.run(update_step)
