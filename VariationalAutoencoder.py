@@ -5,11 +5,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 plt.switch_backend('agg')
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "4"
 BATCH_SIZE = 400
 
 ENCODE_DIM = 2
-
+R = 20
 GAUSSIAN_OUTPUT = False
 
 def show_images(images, col_size=28, row_size=28, n=10, pic_name='origin.png'):
@@ -21,7 +21,7 @@ def show_images(images, col_size=28, row_size=28, n=10, pic_name='origin.png'):
                     res[i*row_size + row][j*col_size + col] = \
                         images[i*n + j, row*row_size + col]
     pic = (res*255).astype(np.uint8)
-    plt.figure()
+    plt.figure(figsize=(12, 12))
     plt.imshow(pic)
     plt.savefig(pic_name)
     plt.close()
@@ -66,8 +66,8 @@ with tf.name_scope('decoder'):
     # fc_decode = tf.layers.batch_normalization(layers.fully_connected(fc_decode, HIDDEN_DIM))
     # fc_decode = tf.layers.batch_normalization(layers.fully_connected(fc_decode, HIDDEN_DIM))
     decode_outsize = 128
-    fc_decode = layers.fully_connected(encoder_output, 28*28*128)
-    fc = tf.reshape(fc_decode, (-1, 28, 28, 128))
+    fc_decode = layers.fully_connected(encoder_output, 28*28*decode_outsize)
+    fc = tf.reshape(fc_decode, (-1, 28, 28, decode_outsize))
     decoder_conv = fc
     prev_output = fc
     for i in range(3):
@@ -92,51 +92,24 @@ with tf.name_scope('decoder'):
     # conv_t6 = tf.layers.conv2d_transpose(conv_t5, filters=decode_outsize, kernel_size=(6, 6), activation=tf.nn.relu)
     # conv_t6 = tf.layers.batch_normalization(conv_t6)
 
-    if GAUSSIAN_OUTPUT:
-        pass
-        # reconstruct_mu = tf.layers.conv2d(conv_t3, filters=1, kernel_size=(1, 1), strides=(1, 1),
-        #                                  activation=None)
-        # reconstruct_log_sigma_square = tf.layers.conv2d(conv_t3, filters=1, kernel_size=(1, 1), strides=(1, 1),
-        #                               activation=tf.nn.sigmoid)
-        # reconstruct = reconstruct_mu
-    else:
-        reconstruct_p = tf.layers.conv2d(conv_t6, filters=1, kernel_size=(1, 1), strides=(1, 1),
-                                         activation=tf.nn.sigmoid)
-        # reconstruct_p = layers.fully_connected(fc_decode, 28*28, activation_fn=tf.nn.sigmoid)
-        # reconstruct_p = tf.reshape(reconstruct_p, (-1, 28, 28, 1))
-        reconstruct = reconstruct_p
+    reconstruct_p = tf.layers.conv2d(conv_t6, filters=1, kernel_size=(1, 1), strides=(1, 1),
+                                     activation=tf.nn.sigmoid)
+    reconstruct = reconstruct_p
 with tf.name_scope('loss'):
-    latent_distribution_loss = 0.5 * (tf.square(mu) + tf.exp(log_sigma_square) - 1 - log_sigma_square)
-    #
-    # latent_loss = -0.5 * tf.reduce_sum(1.0 + self.z_log_sigma_sq - tf.square(self.z_mean) - tf.exp(self.z_log_sigma_sq), axis=1)
-
-
-    # latent_distribution_loss = 0.5 * (
-    #             tf.exp(-log_sigma_square) + tf.square(mu) / tf.exp(log_sigma_square) + log_sigma_square)
-    # latent_distribution_loss = 0.5 * (tf.exp(log_sigma_square) + tf.square(mu) - log_sigma_square -1)
-    if GAUSSIAN_OUTPUT:
-        # output_dim = reconstruct_mu.shape[-1] * reconstruct_mu.shape[-2] * reconstruct_mu.shape[-3]
-        # log_likelihood = -reconstruct_log_sigma_square - tf.square((input_data - reconstruct_mu))/tf.exp(reconstruct_log_sigma_square) - output_dim/2*tf.math.log(2*tf.math.pi)
-        log_likelihood = -reconstruct_log_sigma_square - tf.square((input_data - reconstruct_mu)) / tf.exp(
-            reconstruct_log_sigma_square)
-        # log_likelihood = tf.squared_difference(input_data, reconstruct_mu)
-
-        # loss = tf.reduce_mean(
-        #     tf.reduce_sum(-log_likelihood, axis=[-1, -2, -3]))
-    else:
-        log_likelihood = input_data*tf.log(reconstruct_p + 1e-3) + (1 - input_data)*tf.log(1 - reconstruct_p + 1e-3)
-    loss = tf.reduce_mean(tf.reduce_mean(-log_likelihood, axis=[-1, -2, -3]) + tf.reduce_mean(latent_distribution_loss, axis=-1))
-    # loss = tf.reduce_mean(log_likelihood)*100 + tf.reduce_mean(latent_distribution_loss)
-    # loss = tf.reduce_mean(tf.squared_difference(reconstruct_p, input_data))
-    # loss = tf.reduce_mean(-log_likelihood) + tf.reduce_mean(latent_distribution_loss)
-    # train_summ = tf.summary.merge([tf.summary.scalar('loss', loss), tf.summary.scalar('log_likelihood', tf.reduce_mean(log_likelihood)), tf.summary.scalar('latent_distribution_loss', tf.reduce_mean(latent_distribution_loss))])
+    # latent_distribution_loss = 0.5 * (tf.square(mu) + tf.exp(log_sigma_square) - 1 - log_sigma_square)
+    latent_distribution_loss = 0.5 * ((tf.square(mu) + tf.exp(log_sigma_square))/R**2 - 1 - log_sigma_square + 2*np.log(R))
+    log_likelihood = input_data*tf.log(reconstruct_p + 1e-3) + (1 - input_data)*tf.log(1 - reconstruct_p + 1e-3)
+    # loss = tf.reduce_mean(tf.reduce_mean(-log_likelihood, axis=[-1, -2, -3]) + tf.reduce_mean(latent_distribution_loss, axis=-1))
+    loss = tf.reduce_mean(
+        tf.reduce_mean(-log_likelihood, axis=[-1, -2, -3]) + tf.reduce_mean(latent_distribution_loss, axis=-1)*0.1)
     train_summ = tf.summary.merge(
-        # [tf.summary.scalar('loss', loss), tf.summary.scalar('log_likelihood', tf.reduce_mean(tf.reduce_sum(log_likelihood, axis=[-1, -2, -3]))),
-        #  tf.summary.scalar('latent_distribution_loss', tf.reduce_mean(tf.reduce_sum(latent_distribution_loss, axis=-1)))])
         [tf.summary.scalar('loss', loss),
          tf.summary.scalar('log_likelihood', tf.reduce_mean(log_likelihood)),
          tf.summary.scalar('latent_distribution_loss',
-                           tf.reduce_mean(latent_distribution_loss))])
+                           tf.reduce_mean(latent_distribution_loss)),
+         tf.summary.histogram('latent_distribution_mu', mu),
+         tf.summary.histogram('latent_distribution_sigma', tf.exp(log_sigma_square)),
+         tf.summary.histogram('latent_distribution', encoder_output)])
     test_summ = tf.summary.merge([tf.summary.scalar('test_loss', loss)])
 
 with tf.name_scope('train'):
@@ -154,15 +127,16 @@ if __name__ == '__main__':
     test_imgs = dataset.all_test_data()
     from itertools import product
 
-    linspace = np.linspace(start=-1, stop=1, num=10)
-    test_z = np.zeros((10, 10, ENCODE_DIM), )
-    for i in range(10):
-        for j in range(10):
+    linspace = np.linspace(start=-1.5*R, stop=1.5*R, num=20)
+    test_z = np.zeros((20, 20, ENCODE_DIM), )
+    for i in range(20):
+        for j in range(20):
             test_z[i, j] = [linspace[i], linspace[j]]
     test_z = test_z.reshape(-1, ENCODE_DIM)
-    config = tf.ConfigProto()
-    config.gpu_options.allow_growth = True
-    with tf.Session(config=config) as sess:
+    # config = tf.ConfigProto()
+    # config.gpu_options.allow_growth = True
+    # with tf.Session(config=config) as sess:
+    with tf.Session() as sess:
         writer = tf.summary.FileWriter('log', sess.graph)
         sess.run(init)
         step = 0
@@ -186,16 +160,16 @@ if __name__ == '__main__':
             if step % 30 == 0:
                 summ =sess.run(test_summ, feed_dict={input_data: test_imgs, epsilon: np.random.normal(0, 1, [len(test_imgs), ENCODE_DIM])})
                 writer.add_summary(summ, step)
-            if step % 100 == 0:
-                show_images(np.reshape(np.array(test_imgs[0:100]), (100, -1)), pic_name='img/origin_%d'%step)
-                reconstructed_imgs = sess.run(reconstruct_p,
-                                                      feed_dict={input_data: np.array(test_imgs[0:100]),
-                                                                 epsilon: np.random.normal(0, 1, [100, ENCODE_DIM])})
-                show_images(np.reshape(reconstructed_imgs, (100, -1)), pic_name='img/reconstruct_%d'%step)
-            if step % 500 == 0:
+            # if step % 100 == 0:
+            #     show_images(np.reshape(np.array(test_imgs[0:100]), (100, -1)), pic_name='img/origin_%d'%step)
+            #     reconstructed_imgs = sess.run(reconstruct_p,
+            #                                           feed_dict={input_data: np.array(test_imgs[0:100]),
+            #                                                      epsilon: np.random.normal(0, 1, [100, ENCODE_DIM])})
+            #     show_images(np.reshape(reconstructed_imgs, (100, -1)), pic_name='img/reconstruct_%d'%step)
+            if step % 200 == 0:
                 #encoder_output : [size, 2]
                 reconstructed_imgs = sess.run(reconstruct, feed_dict={encoder_output: test_z})
-                show_images(np.reshape(reconstructed_imgs, (100, -1)), pic_name='img/generate_%d'%step)
+                show_images(np.reshape(reconstructed_imgs, (400, -1)), n=20, pic_name='img/generate_%d'%step)
 
             step += 1
             sess.run(update_step)
