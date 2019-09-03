@@ -13,7 +13,8 @@ IMG_CHANNELS = 1
 SAMPLE_SPACE_DIM = 10
 REAL_COUNT = 100
 FAKE_COUNT = 100
-N_critic = 20
+N_critic = 2
+c = 0.01
 def show_images(images, col_size=28, row_size=28, n=10, pic_name='origin.png'):
     res = np.zeros((n*row_size, n*col_size))
     for i in range(n):
@@ -74,11 +75,11 @@ fake_prediction,discriminator_fc = get_discriminator(generated_output, reuse=Tru
 with tf.variable_scope('discriminator', reuse=True):
     for v in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="discriminator"):
         v_name = v.name[len('discriminator/'):-2]
-        v = tf.get_variable(v_name, constraint=lambda x: tf.clip_by_value(x, -0.5, 0.5))
+        v = tf.get_variable(v_name, constraint=lambda x: tf.clip_by_value(x, -c, c))
 
 with tf.variable_scope('loss'):
     discriminator_loss = tf.reduce_mean(fake_prediction) - tf.reduce_mean(real_prediction)
-    generative_loss = tf.reduce_mean(fake_prediction)
+    generative_loss = -tf.reduce_mean(fake_prediction)
 
     discriminator_summ = tf.summary.merge(
         [tf.summary.scalar('Wasserstein_Distance', -discriminator_loss)])
@@ -88,16 +89,18 @@ with tf.variable_scope('loss'):
     img_summ = tf.summary.merge([tf.summary.image('generated_imgs', generated_output)])
 
 with tf.variable_scope('train'):
-    global_step = tf.Variable(0)
-    update_step = global_step.assign_add(1)
-    learning_rate = tf.train.exponential_decay(1e-4, global_step, decay_steps=100, decay_rate=0.95, staircase=True)
-
+    discriminator_global_step = tf.Variable(0)
+    update_discriminator_step = discriminator_global_step.assign_add(1)
+    discriminator_learning_rate = tf.train.exponential_decay(1e-4, discriminator_global_step, decay_steps=100, decay_rate=0.95, staircase=True)
     discriminator_variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="discriminator")
+    discriminator_train_step = tf.train.RMSPropOptimizer(learning_rate=discriminator_learning_rate).minimize(discriminator_loss, var_list=discriminator_variables)
 
-    discriminator_train_step = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(discriminator_loss, var_list=discriminator_variables)
-
+    generator_global_step = tf.Variable(0)
+    update_generator_step = generator_global_step.assign_add(1)
+    generator_learning_rate = tf.train.exponential_decay(1e-4, generator_global_step, decay_steps=100,
+                                                             decay_rate=0.95, staircase=True)
     generator_variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="generator")
-    generative_optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate)
+    generative_optimizer = tf.train.RMSPropOptimizer(learning_rate=generator_learning_rate)
     generated_output_gradients, discriminator_fc_gradients = generative_optimizer.compute_gradients(loss=generative_loss, var_list=[generated_output, discriminator_fc])
     gradient_summ = tf.summary.merge([tf.summary.scalar('square_generated_output_gradients', tf.reduce_mean(tf.square(generated_output_gradients))),
                                       tf.summary.scalar('abs_generated_output_gradients',tf.reduce_mean(tf.abs(generated_output_gradients))),
@@ -105,7 +108,7 @@ with tf.variable_scope('train'):
                                       tf.summary.scalar('abs_discriminator_fc_gradients',tf.reduce_mean(tf.abs(discriminator_fc_gradients))),])
 
     generative_train_step = generative_optimizer.minimize(generative_loss,var_list=generator_variables)
-    tf.summary.scalar('learning rate', learning_rate)
+
 init = tf.global_variables_initializer()
 
 if __name__ == '__main__':
@@ -121,7 +124,6 @@ if __name__ == '__main__':
         labels = np.concatenate((np.ones(REAL_COUNT, dtype=np.float32), np.zeros(FAKE_COUNT, dtype=np.float32)), axis=0)
         for imgs, _, epoch in dataset.training_batches():
             print('step>>>', step)
-            # z = np.random.normal(0, 1, size=(FAKE_COUNT, SAMPLE_SPACE_DIM))
             z = np.random.uniform(-1, 1, size=(FAKE_COUNT, SAMPLE_SPACE_DIM))
             _, summ, r_pred, f_pred = sess.run((discriminator_train_step, discriminator_summ, real_prediction, fake_prediction),
                                      feed_dict={input_data: imgs,
@@ -136,6 +138,7 @@ if __name__ == '__main__':
                                                                                                 SAMPLE_SPACE_DIM))})
                 writer.add_summary(summ, generate_step)
                 writer.add_summary(grad_summ, generate_step)
+                sess.run(update_generator_step)
                 generate_step += 1
 
                 if generate_step % 20 == 0:
@@ -144,4 +147,4 @@ if __name__ == '__main__':
                     show_images(np.reshape(generated_imgs[:100, :], (100, -1)), pic_name='img/generate_%d' % step)
 
             step += 1
-            sess.run(update_step)
+            sess.run(update_discriminator_step)
